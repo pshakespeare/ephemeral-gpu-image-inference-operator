@@ -1,4 +1,4 @@
-apiVersion: gpu.yourdomain.io/v1alpha1
+apiVersion: gpu.redtails.io/v1alpha1
 kind: EphemeralAccelerationJob
 metadata:
   name: sample-inference
