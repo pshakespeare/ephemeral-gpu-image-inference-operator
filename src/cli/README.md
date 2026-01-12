@@ -37,7 +37,7 @@ egpu create training-job \
   --output-path /artifacts/results.json \
   --project-dir ./ml-project \
   --ttl 3600 \
-  --storage-class local-path \
+  --storage-class longhorn \
   --pvc-size 5Gi
 ```
 
@@ -113,12 +113,14 @@ egpu watch inference-job
 # 3. Get final status
 egpu get inference-job
 
-# 4. Retrieve artifacts (using kubectl)
-kubectl run debug --rm -i --tty --image=busybox --restart=Never \
-  --overrides='{"spec":{"volumes":[{"name":"artifacts","persistentVolumeClaim":{"claimName":"artifacts-inference-job"}}],"containers":[{"name":"debug","image":"busybox","volumeMounts":[{"name":"artifacts","mountPath":"/mnt"}]}]}}' \
-  -- sh -c "cat /mnt/output.json"
+# 4. Download a file into PVC (alternative to project-dir)
+egpu copy-file inference-job https://example.com/test-image.jpg --target-path /artifacts/test-image.jpg
 
-# 5. Clean up
+# 5. Access artifacts using debug pod
+egpu debug inference-job
+# Then: kubectl exec -it debug-inference-job-<timestamp> -n default -- sh
+
+# 6. Clean up
 egpu delete inference-job --delete-pvc
 ```
 
@@ -149,7 +151,7 @@ Creates an EphemeralAccelerationJob resource with optional project directory upl
 - `--project-dir` - Local directory to copy into PVC
 - `--create-pvc` - Create PVC even without project-dir
 - `--pvc-name` - Custom PVC name (default: artifacts-<job-name>)
-- `--storage-class` - Storage class for PVC (default: local-path)
+- `--storage-class` - Storage class for PVC (default: longhorn)
 - `--pvc-size` - PVC size (default: 1Gi)
 - `--image` - Job container image (default: gpu-job-inference:latest)
 - `--command` - Custom command to run (space-separated)
@@ -202,20 +204,73 @@ Cleans up PVCs for finished jobs based on TTL. Scans all EphemeralAccelerationJo
 - `--namespace, -n` - Filter by namespace (all namespaces if not specified)
 - `--verbose, -v` - Show detailed output for each job
 
+### `copy-file`
+
+Downloads a file from a URL into a PVC using a temporary pod. This replaces the need for complex kubectl commands.
+
+**Required:**
+- `job_name` - Job name (used to determine PVC name: artifacts-<job-name>)
+- `url` - URL to download from
+
+**Optional:**
+- `--namespace, -n` - Kubernetes namespace (default: default)
+- `--pvc-name` - PVC name (default: artifacts-<job-name>)
+- `--target-path` - Target path in PVC (default: /artifacts/input.jpg)
+
+**Example:**
+```bash
+egpu copy-file my-job https://example.com/image.jpg --target-path /artifacts/input.jpg
+```
+
+### `debug`
+
+Creates a debug pod with PVC mounted for interactive access. This replaces the need for complex kubectl pod creation commands.
+
+**Required:**
+- `job_name` - Job name (used to determine PVC name: artifacts-<job-name>)
+
+**Optional:**
+- `--namespace, -n` - Kubernetes namespace (default: default)
+- `--pvc-name` - PVC name (default: artifacts-<job-name>)
+- `--pod-name` - Pod name (default: debug-<job-name>-<timestamp>)
+- `--image` - Container image (default: busybox:latest)
+- `--exec` - Attempt to exec into pod (may not work for interactive TTY)
+- `--keep` - Keep pod running (default: show instructions to delete)
+
+**Example:**
+```bash
+# Create debug pod
+egpu debug my-job
+
+# Access the pod (PVC mounted at /mnt)
+kubectl exec -it debug-my-job-<timestamp> -n default -- sh
+```
+
 ## Comparison with kubectl
 
 **Before (complex kubectl overrides):**
 ```bash
+# Download file
 kubectl run copy-pod --rm -i --tty --image=busybox --restart=Never \
-  --overrides='{"spec":{"volumes":[...],"containers":[...]}}' -- sh
+  --overrides='{"spec":{"volumes":[{"name":"artifacts","persistentVolumeClaim":{"claimName":"artifacts-sample-inference"}}],"containers":[{"name":"copy","image":"busybox","command":["sh"],"volumeMounts":[{"name":"artifacts","mountPath":"/mnt"}]}]}}' \
+  -- sh -c "wget -O /mnt/input.jpg https://example.com/image.jpg"
+
+# Debug pod
+kubectl run debug-pod --rm -i --tty --image=busybox --restart=Never \
+  --overrides='{"spec":{"volumes":[{"name":"artifacts","persistentVolumeClaim":{"claimName":"artifacts-sample-inference"}}],"containers":[{"name":"debug","image":"busybox","command":["sh"],"volumeMounts":[{"name":"artifacts","mountPath":"/mnt"}]}]}}' \
+  -- sh
 ```
 
 **After (intuitive CLI):**
 ```bash
-egpu create my-job --project-dir ./my-code
+# Download file
+egpu copy-file my-job https://example.com/image.jpg --target-path /artifacts/input.jpg
+
+# Debug pod
+egpu debug my-job
 ```
 
-The CLI handles all the complexity of PVC creation, file copying, and resource management automatically.
+The CLI handles all the complexity of PVC creation, file copying, pod management, and resource cleanup automatically using the Kubernetes Python client.
 
 ## PVC Management
 

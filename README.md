@@ -152,12 +152,23 @@ sequenceDiagram
 kubectl cluster-info
 
 # Check GPU nodes
-kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.capacity.nvidia\.com/gpu}{"\n"}{end}'
+kubectl get nodes -o wide | grep "nvidia.com/gpu.count"
 
 # Check NVIDIA device plugin
-kubectl get daemonset -n kube-system | grep nvidia
+kubectl get pods -n gpu-operator
+NAME                                                          READY   STATUS      RESTARTS   AGE
+gpu-feature-discovery-vz9lr                                   1/1     Running     0          4d3h
+gpu-operator-7569f8b499-2ctcj                                 1/1     Running     0          4d3h
+gpu-operator-node-feature-discovery-gc-55ffc49ccc-kss46       1/1     Running     0          4d3h
+gpu-operator-node-feature-discovery-master-6b5787f695-ztbqs   1/1     Running     0          4d3h
+gpu-operator-node-feature-discovery-worker-sjj9s              1/1     Running     0          4d3h
+nvidia-container-toolkit-daemonset-6wnpq                      1/1     Running     0          4d3h
+nvidia-cuda-validator-fh88b                                   0/1     Completed   0          4d2h
+nvidia-dcgm-exporter-ssl29                                    1/1     Running     0          4d3h
+nvidia-device-plugin-daemonset-fwc8c                          1/1     Running     0          4d3h
+nvidia-operator-validator-vs75n                               1/1     Running     0          4d3h
 
-# Check storage class (for k3s, should be "local-path")
+# Check storage class (should show "longhorn" for Longhorn clusters)
 kubectl get storageclass
 ```
 
@@ -185,6 +196,13 @@ egpu create training-job \
   --input-path /artifacts/input.jpg \
   --pvc-ttl 86400
 
+# Download a file from URL into PVC
+egpu copy-file my-job https://example.com/image.jpg --target-path /artifacts/input.jpg
+
+# Create debug pod for interactive access to PVC
+egpu debug my-job
+# Then: kubectl exec -it debug-my-job-<timestamp> -n default -- sh
+
 # Watch job status
 egpu watch my-job
 
@@ -208,7 +226,6 @@ egpu delete my-job --delete-pvc
 - **TTL-based Cleanup**: Automatic PVC cleanup based on configurable TTL
 - **Native Feel**: Works like `kubectl get`, `kubectl create`, etc.
 
-See [src/cli/README.md](src/cli/README.md) and [CLI-USAGE.md](CLI-USAGE.md) for complete CLI documentation.
 
 ## Quick Start
 
@@ -254,7 +271,7 @@ This installs the operator via Helm, including:
 ```bash
 # Create job with project directory (automatically handles PVC and file upload)
 egpu create sample-inference \
-  --project-dir ./examples \
+  --project-dir ./resources \
   --input-path /artifacts/sample.jpg \
   --model resnet50
 
@@ -262,26 +279,14 @@ egpu create sample-inference \
 egpu watch sample-inference
 ```
 
-**Option B: Using kubectl**
 
-```bash
-# Prepare input image first (see "Running a Job" section below)
-# Then apply the example
-kubectl apply -f examples/ephemeralaccelerationjob.yaml
-
-# Watch status
-kubectl get ephemeralaccelerationjob sample-inference -w
-```
-
-**Option C: Using Makefile**
+**Option B**
 
 ```bash
 make example
 ```
 
 ## Running a Job
-
-### Using CLI (Recommended - Simplest Method)
 
 The CLI handles everything automatically:
 
@@ -311,9 +316,22 @@ egpu get my-inference
 
 Before creating the EphemeralAccelerationJob, you need to copy your input image into the PVC. The operator will create a PVC named `artifacts-<job-name>`.
 
+**Option A: Using CLI (Recommended)**
 ```bash
 # Apply EphemeralAccelerationJob (operator creates PVC)
-kubectl apply -f examples/ephemeralaccelerationjob.yaml
+kubectl apply -f resources/ephemeralaccelerationjob.yaml
+
+# Wait for PVC to be created
+kubectl wait --for=condition=Bound pvc/artifacts-sample-inference --timeout=60s
+
+# Download file using CLI
+egpu copy-file sample-inference https://example.com/image.jpg --target-path /artifacts/input.jpg
+```
+
+**Option B: Using kubectl directly**
+```bash
+# Apply EphemeralAccelerationJob (operator creates PVC)
+kubectl apply -f resources/ephemeralaccelerationjob.yaml
 
 # Wait for PVC to be created
 kubectl wait --for=condition=Bound pvc/artifacts-sample-inference --timeout=60s
@@ -360,7 +378,19 @@ After the job completes, retrieve the output:
 # Using CLI (easiest)
 egpu get sample-inference  # Shows artifact path
 
-# Or create debug pod to access PVC
+# Create debug pod using CLI
+egpu debug sample-inference
+# Then exec into it:
+kubectl exec -it debug-sample-inference-<timestamp> -n default -- sh
+
+# Inside pod, check artifacts (PVC mounted at /mnt)
+cat /mnt/output.json
+ls -la /mnt/
+```
+
+**Alternative: Using kubectl directly**
+```bash
+# Create debug pod manually
 kubectl run debug-pod --rm -i --tty --image=busybox --restart=Never --overrides='
 {
   "spec": {
@@ -401,7 +431,7 @@ spec:
     gpu: 1                            # Number of GPUs
   ttlSecondsAfterFinished: 0         # Pod TTL: 0 = delete immediately, >0 = keep for N seconds
   pvcTTLSecondsAfterFinished: 3600   # PVC TTL: 0 = delete immediately, default: 3600 (1 hour)
-  storageClass: local-path            # PVC storage class
+  storageClass: longhorn              # PVC storage class (use "longhorn" for Longhorn clusters)
   pvcSize: 1Gi                        # PVC size
   image: gpu-job-inference:latest     # Job container image
 ```
@@ -477,7 +507,7 @@ pip install -e .
 python -m operator.main
 
 # In another terminal, apply EphemeralAccelerationJob
-kubectl apply -f examples/ephemeralaccelerationjob.yaml
+kubectl apply -f resources/ephemeralaccelerationjob.yaml
 ```
 
 ### Project Structure
@@ -495,9 +525,9 @@ kubectl apply -f examples/ephemeralaccelerationjob.yaml
 │   │   └── run_infer.py   # Inference script
 │   └── cli/               # CLI tool
 │       └── main.py        # CLI implementation
-├── docker/                # Dockerfiles
+├── runtimes/              # Dockerfiles
 ├── charts/                # Helm chart
-├── examples/              # Example resources
+├── resources/             # Example resources and sample files
 └── scripts/               # Utility scripts
 ```
 
@@ -548,7 +578,8 @@ kubectl get pvc artifacts-<job-name>
 # Check storage class
 kubectl get storageclass
 
-# For k3s, ensure local-path provisioner is installed
+# For Longhorn clusters, ensure Longhorn is installed and storage class is available
+# For k3s clusters, ensure local-path provisioner is installed
 ```
 
 ## PVC Lifecycle Management
@@ -617,6 +648,8 @@ kubectl delete crd ephemeralaccelerationjobs.gpu.yourdomain.io
 - ✅ **Intuitive Interface**: Works like native Kubernetes commands
 - ✅ **Automatic PVC Management**: Creates and manages PVCs automatically
 - ✅ **Project Upload**: Easily upload project directories to PVCs
+- ✅ **File Download**: Download files from URLs directly into PVCs
+- ✅ **Debug Pods**: Create debug pods for interactive PVC access
 - ✅ **TTL-based Cleanup**: Automatic PVC cleanup based on TTL
 - ✅ **Status Monitoring**: Real-time job status watching
 

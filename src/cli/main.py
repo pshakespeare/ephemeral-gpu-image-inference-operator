@@ -36,7 +36,7 @@ def load_kubeconfig():
             return False
 
 
-def create_pvc(v1, name, namespace, storage_class="local-path", size="1Gi"):
+def create_pvc(v1, name, namespace, storage_class="longhorn", size="1Gi"):
     """Create a PVC if it doesn't exist."""
     try:
         v1.read_namespaced_persistent_volume_claim(name=name, namespace=namespace)
@@ -231,7 +231,7 @@ def create_gpujob(
     gpu=1,
     ttl=0,
     pvc_ttl=3600,
-    storage_class="local-path",
+    storage_class="longhorn",
     pvc_size="1Gi",
     image="gpu-job-inference:latest",
     command=None,
@@ -674,6 +674,234 @@ def cmd_cleanup(args):
         sys.exit(1)
 
 
+def cmd_copy_file(args):
+    """Copy a file from URL into PVC using a temporary pod."""
+    if not load_kubeconfig():
+        sys.exit(1)
+
+    v1 = client.CoreV1Api()
+    
+    pvc_name = args.pvc_name or f"artifacts-{args.job_name}"
+    pod_name = f"copy-file-{args.job_name}-{int(time.time())}"
+    
+    # Verify PVC exists
+    try:
+        pvc = v1.read_namespaced_persistent_volume_claim(
+            name=pvc_name, namespace=args.namespace
+        )
+        if pvc.status.phase != "Bound":
+            print(f"⚠ PVC '{pvc_name}' exists but is not bound yet", file=sys.stderr)
+    except ApiException as e:
+        if e.status == 404:
+            print(f"✗ PVC '{pvc_name}' not found. Create it first or specify --pvc-name", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(f"✗ Error checking PVC: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Determine target path
+    target_path = args.target_path
+    if not target_path.startswith("/"):
+        target_path = f"/artifacts/{target_path}"
+    
+    print(f"Downloading '{args.url}' to PVC '{pvc_name}' at '{target_path}'...")
+    
+    # Create pod with PVC mount
+    copy_pod = client.V1Pod(
+        metadata=client.V1ObjectMeta(name=pod_name, namespace=args.namespace),
+        spec=client.V1PodSpec(
+            restart_policy="Never",
+            containers=[
+                client.V1Container(
+                    name="copy",
+                    image="busybox:latest",
+                    command=["sh", "-c", f"wget -O {target_path} {args.url} && ls -lh {target_path}"],
+                    volume_mounts=[
+                        client.V1VolumeMount(
+                            name="artifacts", mount_path="/artifacts"
+                        )
+                    ],
+                )
+            ],
+            volumes=[
+                client.V1Volume(
+                    name="artifacts",
+                    persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                        claim_name=pvc_name
+                    ),
+                )
+            ],
+        ),
+    )
+    
+    try:
+        # Create pod
+        v1.create_namespaced_pod(namespace=args.namespace, body=copy_pod)
+        print(f"Created pod '{pod_name}'...")
+        
+        # Wait for pod to complete
+        for _ in range(60):
+            try:
+                pod = v1.read_namespaced_pod(name=pod_name, namespace=args.namespace)
+                phase = pod.status.phase
+                
+                if phase == "Succeeded":
+                    # Get pod logs to show the result
+                    logs = v1.read_namespaced_pod_log(
+                        name=pod_name, namespace=args.namespace
+                    )
+                    if logs:
+                        print(logs)
+                    print(f"✓ File downloaded successfully to '{target_path}'")
+                    break
+                elif phase == "Failed":
+                    # Get pod logs for error
+                    try:
+                        logs = v1.read_namespaced_pod_log(
+                            name=pod_name, namespace=args.namespace
+                        )
+                        print(f"✗ Pod failed: {logs}", file=sys.stderr)
+                    except:
+                        print(f"✗ Pod failed", file=sys.stderr)
+                    sys.exit(1)
+            except ApiException:
+                pass
+            time.sleep(1)
+        else:
+            print("✗ Pod did not complete in time", file=sys.stderr)
+            sys.exit(1)
+    
+    except Exception as e:
+        print(f"✗ Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        # Clean up pod
+        try:
+            v1.delete_namespaced_pod(name=pod_name, namespace=args.namespace, grace_period_seconds=0)
+        except ApiException:
+            pass
+
+
+def cmd_debug(args):
+    """Create a debug pod with PVC mounted for interactive access."""
+    if not load_kubeconfig():
+        sys.exit(1)
+
+    v1 = client.CoreV1Api()
+    
+    pvc_name = args.pvc_name or f"artifacts-{args.job_name}"
+    pod_name = args.pod_name or f"debug-{args.job_name}-{int(time.time())}"
+    
+    # Verify PVC exists
+    try:
+        pvc = v1.read_namespaced_persistent_volume_claim(
+            name=pvc_name, namespace=args.namespace
+        )
+        if pvc.status.phase != "Bound":
+            print(f"⚠ PVC '{pvc_name}' exists but is not bound yet", file=sys.stderr)
+    except ApiException as e:
+        if e.status == 404:
+            print(f"✗ PVC '{pvc_name}' not found. Create it first or specify --pvc-name", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(f"✗ Error checking PVC: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Check if pod already exists
+    try:
+        existing_pod = v1.read_namespaced_pod(name=pod_name, namespace=args.namespace)
+        if existing_pod.status.phase in ["Running", "Pending"]:
+            print(f"Pod '{pod_name}' already exists. Use --pod-name to specify a different name.")
+            print(f"To exec into existing pod: kubectl exec -it {pod_name} -n {args.namespace} -- sh")
+            sys.exit(1)
+    except ApiException:
+        pass  # Pod doesn't exist, continue
+    
+    print(f"Creating debug pod '{pod_name}' with PVC '{pvc_name}' mounted at '/mnt'...")
+    
+    # Create debug pod
+    debug_pod = client.V1Pod(
+        metadata=client.V1ObjectMeta(name=pod_name, namespace=args.namespace),
+        spec=client.V1PodSpec(
+            restart_policy="Never",
+            containers=[
+                client.V1Container(
+                    name="debug",
+                    image=args.image,
+                    command=["sh"],
+                    stdin=True,
+                    tty=True,
+                    volume_mounts=[
+                        client.V1VolumeMount(
+                            name="artifacts", mount_path="/mnt"
+                        )
+                    ],
+                )
+            ],
+            volumes=[
+                client.V1Volume(
+                    name="artifacts",
+                    persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                        claim_name=pvc_name
+                    ),
+                )
+            ],
+        ),
+    )
+    
+    try:
+        # Create pod
+        v1.create_namespaced_pod(namespace=args.namespace, body=debug_pod)
+        print(f"✓ Pod '{pod_name}' created")
+        
+        # Wait for pod to be ready
+        print("Waiting for pod to be ready...")
+        for _ in range(30):
+            try:
+                pod = v1.read_namespaced_pod(name=pod_name, namespace=args.namespace)
+                if pod.status.phase == "Running":
+                    break
+            except ApiException:
+                pass
+            time.sleep(1)
+        else:
+            print("⚠ Pod may not be ready yet")
+        
+        print(f"\n✓ Debug pod is ready!")
+        print(f"\nTo access the pod, run:")
+        print(f"  kubectl exec -it {pod_name} -n {args.namespace} -- sh")
+        print(f"\nThe PVC is mounted at /mnt")
+        
+        if args.exec:
+            # Attempt to exec into the pod
+            print(f"\nAttempting to exec into pod...")
+            print("Note: Interactive TTY may not work perfectly. If it doesn't, use kubectl exec manually.")
+            try:
+                exec_response = v1.connect_get_namespaced_pod_exec(
+                    name=pod_name,
+                    namespace=args.namespace,
+                    command=["sh"],
+                    stdout=True,
+                    stderr=True,
+                    stdin=True,
+                    tty=True,
+                )
+                # Note: The Python client's exec doesn't provide true interactive TTY
+                # So we just print instructions
+                print("For full interactive access, use: kubectl exec -it ...")
+            except Exception as e:
+                print(f"Note: Direct exec not available. Use kubectl: {e}")
+        
+        if not args.keep:
+            print(f"\nNote: Pod will remain running. Delete it with:")
+            print(f"  kubectl delete pod {pod_name} -n {args.namespace}")
+            print(f"Or use --keep flag to keep it running")
+    
+    except Exception as e:
+        print(f"✗ Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
     """Main CLI entrypoint."""
     parser = argparse.ArgumentParser(
@@ -686,6 +914,12 @@ Examples:
 
   # Create a job with custom settings
   %(prog)s create training --model resnet50 --gpu 1 --ttl 3600
+
+  # Download a file into PVC
+  %(prog)s copy-file my-job https://example.com/image.jpg --target-path /artifacts/input.jpg
+
+  # Create debug pod for interactive access
+  %(prog)s debug my-job
 
   # Watch job status
   %(prog)s watch my-job
@@ -760,8 +994,8 @@ Examples:
     )
     create_parser.add_argument(
         "--storage-class",
-        default="local-path",
-        help="Storage class for PVC (default: local-path)",
+        default="longhorn",
+        help="Storage class for PVC (default: longhorn)",
     )
     create_parser.add_argument(
         "--pvc-size", default="1Gi", help="PVC size (default: 1Gi)"
@@ -829,6 +1063,58 @@ Examples:
         "--verbose", "-v", action="store_true", help="Show detailed output"
     )
     cleanup_parser.set_defaults(func=cmd_cleanup)
+
+    # Copy-file command
+    copy_file_parser = subparsers.add_parser(
+        "copy-file", help="Download a file from URL into PVC"
+    )
+    copy_file_parser.add_argument(
+        "job_name", help="Job name (used to determine PVC name: artifacts-<job-name>)"
+    )
+    copy_file_parser.add_argument(
+        "url", help="URL to download from"
+    )
+    copy_file_parser.add_argument(
+        "--namespace", "-n", default="default", help="Kubernetes namespace"
+    )
+    copy_file_parser.add_argument(
+        "--pvc-name", help="PVC name (default: artifacts-<job-name>)"
+    )
+    copy_file_parser.add_argument(
+        "--target-path", default="/artifacts/input.jpg",
+        help="Target path in PVC (default: /artifacts/input.jpg)"
+    )
+    copy_file_parser.set_defaults(func=cmd_copy_file)
+
+    # Debug command
+    debug_parser = subparsers.add_parser(
+        "debug", help="Create a debug pod with PVC mounted for interactive access"
+    )
+    debug_parser.add_argument(
+        "job_name", help="Job name (used to determine PVC name: artifacts-<job-name>)"
+    )
+    debug_parser.add_argument(
+        "--namespace", "-n", default="default", help="Kubernetes namespace"
+    )
+    debug_parser.add_argument(
+        "--pvc-name", help="PVC name (default: artifacts-<job-name>)"
+    )
+    debug_parser.add_argument(
+        "--pod-name", help="Pod name (default: debug-<job-name>-<timestamp>)"
+    )
+    debug_parser.add_argument(
+        "--image", default="busybox:latest",
+        help="Container image (default: busybox:latest)"
+    )
+    debug_parser.add_argument(
+        "--exec", action="store_true",
+        help="Attempt to exec into pod (may not work for interactive TTY)"
+    )
+    debug_parser.add_argument(
+        "--keep", action="store_true",
+        help="Keep pod running (default: show instructions to delete)"
+    )
+    debug_parser.set_defaults(func=cmd_debug)
 
     args = parser.parse_args()
 

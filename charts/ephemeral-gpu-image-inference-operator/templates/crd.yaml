@@ -59,7 +59,7 @@ spec:
                   description: TTL in seconds for PVC deletion after job finishes (0 = delete immediately, default: 1 hour)
                 storageClass:
                   type: string
-                  default: local-path
+                  default: longhorn
                 pvcSize:
                   type: string
                   default: 1Gi

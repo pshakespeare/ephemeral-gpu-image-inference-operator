@@ -48,7 +48,7 @@ install: ## Install operator via Helm
 		--set operator.image.tag=latest \
 		--set job.image.repository=gpu-job-inference \
 		--set job.image.tag=latest \
-		--set storage.storageClass=local-path
+		--set storage.storageClass=longhorn
 	@echo "✓ Operator installed"
 	@echo "Waiting for operator to be ready..."
 	@kubectl wait --for=condition=available --timeout=120s \

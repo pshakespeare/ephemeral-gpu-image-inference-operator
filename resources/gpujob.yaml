@@ -13,6 +13,6 @@ spec:
   resources:
     gpu: 1
   ttlSecondsAfterFinished: 0
-  storageClass: local-path
+  storageClass: longhorn
   pvcSize: 1Gi
   image: gpu-job-inference:latest

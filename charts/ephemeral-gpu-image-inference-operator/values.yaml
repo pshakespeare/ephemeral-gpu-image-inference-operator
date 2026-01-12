@@ -18,7 +18,7 @@ job:
     tag: latest
 
 storage:
-  storageClass: local-path
+  storageClass: longhorn
   size: 1Gi
 
 rbac:
