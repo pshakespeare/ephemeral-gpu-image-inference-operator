@@ -372,32 +372,6 @@ kubectl wait --for=condition=Bound pvc/artifacts-sample-inference --timeout=60s
 egpu copy-file sample-inference https://example.com/image.jpg --target-path /artifacts/input.jpg
 ```
 
-**Option B: Using kubectl directly**
-```bash
-# Apply EphemeralAccelerationJob (operator creates PVC)
-kubectl apply -f resources/ephemeralaccelerationjob.yaml
-
-# Wait for PVC to be created
-kubectl wait --for=condition=Bound pvc/artifacts-sample-inference --timeout=60s
-
-# Copy image using debug pod
-kubectl run copy-pod --rm -i --tty --image=busybox --restart=Never --overrides='
-{
-  "spec": {
-    "volumes": [{
-      "name": "artifacts",
-      "persistentVolumeClaim": {"claimName": "artifacts-sample-inference"}
-    }],
-    "containers": [{
-      "name": "copy",
-      "image": "busybox",
-      "command": ["sh"],
-      "volumeMounts": [{"name": "artifacts", "mountPath": "/mnt"}]
-    }]
-  }
-}' -- sh -c "wget -O /mnt/input.jpg https://example.com/image.jpg"
-```
-
 **Step 2: Watch Status**
 
 ```bash
@@ -428,30 +402,6 @@ egpu debug sample-inference
 kubectl exec -it debug-sample-inference-<timestamp> -n default -- sh
 
 # Inside pod, check artifacts (PVC mounted at /mnt)
-cat /mnt/output.json
-ls -la /mnt/
-```
-
-**Alternative: Using kubectl directly**
-```bash
-# Create debug pod manually
-kubectl run debug-pod --rm -i --tty --image=busybox --restart=Never --overrides='
-{
-  "spec": {
-    "volumes": [{
-      "name": "artifacts",
-      "persistentVolumeClaim": {"claimName": "artifacts-sample-inference"}
-    }],
-    "containers": [{
-      "name": "debug",
-      "image": "busybox",
-      "command": ["sh"],
-      "volumeMounts": [{"name": "artifacts", "mountPath": "/mnt"}]
-    }]
-  }
-}' -- sh
-
-# Inside pod, check artifacts
 cat /mnt/output.json
 ls -la /mnt/
 ```
@@ -682,34 +632,17 @@ kubectl delete crd ephemeralaccelerationjobs.gpu.yourdomain.io
 ## Key Features
 
 ### Operator Features
-- ✅ **Automatic Resource Management**: Creates and manages PVCs and Pods
-- ✅ **TTL-based Cleanup**: Separate TTLs for pods and PVCs
-- ✅ **Status Tracking**: Real-time job status with artifact paths
-- ✅ **Error Handling**: Graceful error handling and retry logic
-- ✅ **Reconciliation**: Timer-based reconciliation ensures desired state
+-  **Automatic Resource Management**: Creates and manages PVCs and Pods
+-  **TTL-based Cleanup**: Separate TTLs for pods and PVCs
+-  **Status Tracking**: Real-time job status with artifact paths
+-  **Error Handling**: Graceful error handling and retry logic
+-  **Reconciliation**: Timer-based reconciliation ensures desired state
 
 ### CLI Features
-- ✅ **Intuitive Interface**: Works like native Kubernetes commands
-- ✅ **Automatic PVC Management**: Creates and manages PVCs automatically
-- ✅ **Project Upload**: Easily upload project directories to PVCs
-- ✅ **File Download**: Download files from URLs directly into PVCs
-- ✅ **Debug Pods**: Create debug pods for interactive PVC access
-- ✅ **TTL-based Cleanup**: Automatic PVC cleanup based on TTL
-- ✅ **Status Monitoring**: Real-time job status watching
-
-## Documentation
-
-- [CLI Usage Guide](CLI-USAGE.md) - Complete CLI documentation
-- [CLI README](src/cli/README.md) - CLI command reference
-- [PVC Lifecycle Management](PVC-LIFECYCLE.md) - Best practices for PVC TTL
-- [Quick Start Guide](QUICKSTART.md) - Step-by-step demo walkthrough
-
-## References
-
-- [Kopf Documentation](https://kopf.readthedocs.io/)
-- [Kubernetes Python Client](https://github.com/kubernetes-client/python)
-- [PyTorch Documentation](https://pytorch.org/docs/)
-
-## License
-
-This is a demo project for educational purposes.
+-  **Intuitive Interface**: Works like native Kubernetes commands
+-  **Automatic PVC Management**: Creates and manages PVCs automatically
+-  **Project Upload**: Easily upload project directories to PVCs
+-  **File Download**: Download files from URLs directly into PVCs
+-  **Debug Pods**: Create debug pods for interactive PVC access
+-  **TTL-based Cleanup**: Automatic PVC cleanup based on TTL
+-  **Status Monitoring**: Real-time job status watching
