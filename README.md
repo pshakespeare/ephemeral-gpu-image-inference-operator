@@ -1,6 +1,6 @@
 # Ephemeral GPU Image Inference Operator
 
-A Kubernetes operator that manages ephemeral GPU jobs for image inference tasks. This operator demonstrates the operator pattern using Kopf (Kubernetes Operator Python Framework) to automate GPU resource lifecycle management.
+A Kubernetes operator that manages ephemeral GPU jobs for image inference tasks.
 
 ## Overview
 
@@ -14,21 +14,18 @@ This operator allows you to run GPU-backed image inference jobs that:
 
 ## Architecture
 
-```
-┌─────────────┐
-│EphemeralAccelerationJob│  Custom Resource (CRD)
-│   (CR)      │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Operator   │  Watches EphemeralAccelerationJob resources
-│   (Kopf)     │
-└──────┬──────┘
-       │
-       ├──► Creates PVC (artifacts storage)
-       ├──► Creates Pod (GPU inference)
-       └──► Updates Status
+```mermaid
+graph TD
+    CR[EphemeralAccelerationJob<br/>Custom Resource CRD]
+    OP[Operator<br/>Kopf]
+    PVC[PVC<br/>Artifacts Storage]
+    POD[Pod<br/>GPU Inference]
+    STATUS[Status<br/>Updates]
+    
+    CR -->|Watches| OP
+    OP -->|Creates| PVC
+    OP -->|Creates| POD
+    OP -->|Updates| STATUS
 ```
 
 ## Sequence Diagram
