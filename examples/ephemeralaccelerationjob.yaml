@@ -1,0 +1,19 @@
+apiVersion: gpu.yourdomain.io/v1alpha1
+kind: EphemeralAccelerationJob
+metadata:
+  name: sample-inference
+  namespace: default
+spec:
+  model: resnet50
+  input:
+    type: image
+    path: /artifacts/input.jpg
+  output:
+    path: /artifacts/output.json
+  resources:
+    gpu: 1
+  ttlSecondsAfterFinished: 0  # Delete pod immediately after completion
+  pvcTTLSecondsAfterFinished: 3600  # Delete PVC 1 hour after completion (default)
+  storageClass: local-path
+  pvcSize: 1Gi
+  image: gpu-job-inference:latest

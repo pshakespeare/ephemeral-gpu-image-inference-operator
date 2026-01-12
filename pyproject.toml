@@ -1,0 +1,38 @@
+[project]
+name = "ephemeral-gpu-image-inference-operator"
+version = "0.1.0"
+description = "Kubernetes operator for ephemeral GPU image inference jobs"
+requires-python = ">=3.12"
+dependencies = [
+    "kopf>=1.36.0",
+    "kubernetes>=28.1.0",
+    "pydantic>=2.5.0",
+]
+
+[project.scripts]
+egpu = "cli.main:main"
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.txt"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.11.0",
+    "ruff>=0.1.6",
+]
+
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

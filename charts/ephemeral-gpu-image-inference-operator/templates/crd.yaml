@@ -1,0 +1,104 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ephemeralaccelerationjobs.gpu.yourdomain.io
+spec:
+  group: gpu.yourdomain.io
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - model
+                - input
+                - output
+              properties:
+                model:
+                  type: string
+                  enum:
+                    - resnet50
+                    - mobilenet_v3_small
+                  default: resnet50
+                input:
+                  type: object
+                  required:
+                    - type
+                    - path
+                  properties:
+                    type:
+                      type: string
+                      default: image
+                    path:
+                      type: string
+                output:
+                  type: object
+                  required:
+                    - path
+                  properties:
+                    path:
+                      type: string
+                resources:
+                  type: object
+                  properties:
+                    gpu:
+                      type: integer
+                      default: 1
+                ttlSecondsAfterFinished:
+                  type: integer
+                  default: 0
+                  description: TTL in seconds for pod deletion after job finishes (0 = delete immediately)
+                pvcTTLSecondsAfterFinished:
+                  type: integer
+                  default: 3600
+                  description: TTL in seconds for PVC deletion after job finishes (0 = delete immediately, default: 1 hour)
+                storageClass:
+                  type: string
+                  default: local-path
+                pvcSize:
+                  type: string
+                  default: 1Gi
+                image:
+                  type: string
+                  default: gpu-job-inference:latest
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Running
+                    - Succeeded
+                    - Failed
+                message:
+                  type: string
+                startedAt:
+                  type: string
+                  format: date-time
+                finishedAt:
+                  type: string
+                  format: date-time
+                podName:
+                  type: string
+                artifactPath:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+      subresources:
+        status: {}
+  scope: Namespaced
+  names:
+    plural: ephemeralaccelerationjobs
+    singular: ephemeralaccelerationjob
+    kind: EphemeralAccelerationJob
+    shortNames:
+      - eaj
+      - eaccel

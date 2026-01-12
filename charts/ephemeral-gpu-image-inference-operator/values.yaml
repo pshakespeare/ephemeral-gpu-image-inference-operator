@@ -1,0 +1,29 @@
+operator:
+  image:
+    repository: ephemeral-gpu-operator
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+job:
+  image:
+    repository: gpu-job-inference
+    tag: latest
+
+storage:
+  storageClass: local-path
+  size: 1Gi
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ""
