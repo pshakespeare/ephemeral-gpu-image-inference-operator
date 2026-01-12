@@ -474,7 +474,6 @@ The operator automatically manages PVC lifecycle based on TTL:
 3. Operator automatically deletes PVC after PVC TTL expires
 4. No manual cleanup required
 
-See [PVC-LIFECYCLE.md](PVC-LIFECYCLE.md) for detailed best practices and configuration options.
 
 ## Cleanup
 
