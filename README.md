@@ -16,16 +16,44 @@ This operator allows you to run GPU-backed image inference jobs that:
 
 ```mermaid
 graph TD
+    USER[User]
+    CLI[CLI Tool<br/>egpu]
     CR[EphemeralAccelerationJob<br/>Custom Resource CRD]
     OP[Operator<br/>Kopf]
-    PVC[PVC<br/>Artifacts Storage]
-    POD[Pod<br/>GPU Inference]
-    STATUS[Status<br/>Updates]
+    K8S[Kubernetes API]
+    PVC[PVC<br/>Longhorn Storage]
+    GPU_POD[GPU Pod<br/>Inference Execution]
+    DEBUG_POD[Debug Pod<br/>Artifact Access]
+    COPY_POD[Copy Pod<br/>File Upload/Download]
+    TIMER[Timer<br/>Reconciliation & Cleanup]
+    
+    USER -->|create/get/watch/delete| CLI
+    CLI -->|Creates/Manages| CR
+    CLI -->|Creates| COPY_POD
+    CLI -->|Creates| DEBUG_POD
+    CLI -->|Queries| K8S
     
     CR -->|Watches| OP
+    OP -->|Reconciles via| K8S
     OP -->|Creates| PVC
-    OP -->|Creates| POD
-    OP -->|Updates| STATUS
+    OP -->|Creates| GPU_POD
+    OP -->|Updates| CR
+    
+    TIMER -->|Periodic checks| OP
+    OP -->|TTL cleanup| GPU_POD
+    OP -->|TTL cleanup| PVC
+    
+    GPU_POD -->|Reads/Writes| PVC
+    DEBUG_POD -->|Accesses| PVC
+    COPY_POD -->|Uploads/Downloads| PVC
+    
+    PVC -->|Backed by| K8S
+    
+    style USER fill:#e1f5ff
+    style CLI fill:#c8e6c9
+    style OP fill:#fff9c4
+    style GPU_POD fill:#ffccbc
+    style PVC fill:#f3e5f5
 ```
 
 ## Sequence Diagram
@@ -44,12 +72,19 @@ sequenceDiagram
 
     Note over User,Pod: Job Creation & Execution Flow
 
-    alt Using CLI
+    alt Using CLI with project directory
         User->>CLI: egpu create my-job --project-dir ./code
         CLI->>K8sAPI: Create EphemeralAccelerationJob CR
         CLI->>K8sAPI: Create/Check PVC
         CLI->>PVC: Upload project files (via busybox pod)
         CLI->>User: Job created, watching...
+    else Using CLI with file download
+        User->>CLI: egpu copy-file my-job https://example.com/image.jpg
+        CLI->>K8sAPI: Create temporary copy pod
+        CLI->>PVC: Download file to PVC
+        CLI->>K8sAPI: Delete copy pod
+        User->>CLI: egpu create my-job
+        CLI->>K8sAPI: Create EphemeralAccelerationJob CR
     else Using kubectl
         User->>K8sAPI: kubectl apply -f job.yaml
     end
@@ -120,6 +155,15 @@ sequenceDiagram
         K8sAPI->>PVC: Delete PVC
     end
     CLI->>User: Cleanup complete
+
+    Note over User,Pod: Debug & Artifact Access (Optional)
+    User->>CLI: egpu debug my-job
+    CLI->>K8sAPI: Create debug pod with PVC mount
+    K8sAPI->>Pod: Debug Pod Running
+    User->>Pod: kubectl exec -it debug-pod -- sh
+    Pod->>PVC: Access artifacts at /mnt
+    User->>Pod: Exit debug session
+    CLI->>K8sAPI: Delete debug pod (if --keep not set)
 
     Note over User,Pod: Job Deletion
     User->>CLI: egpu delete my-job --delete-pvc
