@@ -98,23 +98,87 @@ nvidia-operator-validator-vs75n                               1/1     Running   
 # Check storage class (should show "longhorn" for Longhorn clusters)
 kubectl get storageclass
 ```
+## CLI Tool
+
+The project includes a CLI tool that makes EphemeralAccelerationJobs feel like native Kubernetes resources. The CLI handles PVC creation, file uploads, and resource management automatically.
+
+### Installation
+
+```bash
+# Install CLI
+pip install -e .
+# Or: make cli
+```
+
+### Quick Examples
+
+```bash
+# Create a job with project directory (handles PVC creation and file upload)
+egpu create my-job --project-dir ./my-code --input-path /artifacts/image.jpg
+
+# Create with custom PVC TTL (24 hours retention)
+egpu create training-job \
+  --project-dir ./ml-project \
+  --input-path /artifacts/input.jpg \
+  --pvc-ttl 86400
+
+# Download a file from URL into PVC
+egpu copy-file my-job https://example.com/image.jpg --target-path /artifacts/input.jpg
+
+# Create debug pod for interactive access to PVC
+egpu debug my-job
+# Then: kubectl exec -it debug-my-job-<timestamp> -n default -- sh
+
+# Watch job status
+egpu watch my-job
+
+# Get job details
+egpu get my-job
+
+# List all jobs
+egpu list
+
+# Clean up PVCs for finished jobs (based on TTL)
+egpu cleanup
+
+# Delete job and PVC
+egpu delete my-job --delete-pvc
+```
+
+See [CLI Documentation](src/cli/README.md) for complete CLI reference.
+
 ## Quick Start
 
 ### 1. Build Images
 
 ```bash
-cd ephemeral-gpu-image-inference-operator/runtimes
-docker build -t ephemeral-gpu-operator:latest -f operator.Dockerfile .
-docker build -t gpu-job-inference:latest -f job.Dockerfile .
+# From project root
+cd runtimes
+docker build -t ephemeral-gpu-operator:latest -f operator.Dockerfile ..
+docker build -t gpu-job-inference:latest -f job.Dockerfile ..
+```
+
+Or use the Makefile:
+```bash
+make build
 ```
 
 This builds:
 - `ephemeral-gpu-operator:latest` - The operator container
 - `gpu-job-inference:latest` - The inference job container
 
-### 2. Load Images into your container registry, or load into your k3s cluster
+### 2. Load Images
 
+Push images to your container registry or load into your local cluster:
 
+```bash
+# For k3s, import images manually if needed:
+sudo k3s ctr images import < operator.tar
+sudo k3s ctr images import < job.tar
+
+# Or use make load for kind/k3d clusters
+make load
+```
 
 ### 3. Install Operator
 
@@ -173,25 +237,57 @@ egpu get my-inference
 # Retrieve artifacts (see below)
 ```
 
-### Using CLI
+### Using CLI (Recommended)
 
-**Step 1: Copy Input Image to PVC**
+The CLI handles everything automatically:
 
-Before creating the EphemeralAccelerationJob, you need to copy your input image into the PVC. The operator will create a PVC named `artifacts-<job-name>`.
+```bash
+# Create job with project directory
+# - Automatically creates PVC
+# - Uploads project directory to PVC
+# - Creates EphemeralAccelerationJob
+egpu create my-inference \
+  --project-dir ./my-ml-project \
+  --input-path /artifacts/input.jpg \
+  --model resnet50 \
+  --pvc-ttl 3600  # Keep PVC for 1 hour (default)
 
-**Option A: Using CLI (Recommended)**
+# Or download a file from URL instead of project directory
+egpu copy-file my-inference https://example.com/image.jpg --target-path /artifacts/input.jpg
+egpu create my-inference --input-path /artifacts/input.jpg
+
+# Watch job progress
+egpu watch my-inference
+
+# Get final status
+egpu get my-inference
+
+# Access artifacts using debug pod
+egpu debug my-inference
+# Then: kubectl exec -it debug-my-inference-<timestamp> -n default -- sh
+# Inside pod: cat /mnt/output.json
+```
+
+### Using kubectl (Manual Method)
+
+**Step 1: Create Job and PVC**
+
 ```bash
 # Apply EphemeralAccelerationJob (operator creates PVC)
 kubectl apply -f resources/ephemeralaccelerationjob.yaml
 
 # Wait for PVC to be created
 kubectl wait --for=condition=Bound pvc/artifacts-sample-inference --timeout=60s
+```
 
-# Download file using CLI
+**Step 2: Copy Input Files**
+
+Use the CLI to copy files:
+```bash
 egpu copy-file sample-inference https://example.com/image.jpg --target-path /artifacts/input.jpg
 ```
 
-**Step 2: Watch Status**
+**Step 3: Watch Status**
 
 ```bash
 # Watch EphemeralAccelerationJob
@@ -207,9 +303,7 @@ kubectl get pods -w
 kubectl logs -l app=gpu-job --tail=50
 ```
 
-**Step 3: Retrieve Artifacts**
-
-After the job completes, retrieve the output:
+**Step 4: Retrieve Artifacts**
 
 ```bash
 # Using CLI (easiest)
@@ -262,7 +356,7 @@ The operator supports separate TTLs for pods and PVCs:
   - `3600` = Keep PVC for 1 hour (default) - allows artifact retrieval
   - `> 0` = Keep PVC for N seconds after completion
 
-**Best Practice**: Use separate TTLs to balance cost (delete pods quickly) with usability (keep PVCs for artifact retrieval). See [PVC-LIFECYCLE.md](PVC-LIFECYCLE.md) for details.
+**Best Practice**: Use separate TTLs to balance cost (delete pods quickly) with usability (keep PVCs for artifact retrieval).
 
 ### Status Fields
 
@@ -298,7 +392,7 @@ The inference job writes a JSON file with:
 
 ```bash
 make build          # Build operator and job images
-make load           # Load images into local cluster
+make load           # Load images into local cluster (k3d/kind)
 make install        # Install operator via Helm
 make cli            # Install CLI tool
 make example        # Apply example EphemeralAccelerationJob and watch
@@ -306,6 +400,7 @@ make logs           # Show operator and job logs
 make status         # Show EphemeralAccelerationJob status
 make artifacts      # Instructions for accessing artifacts
 make clean          # Uninstall operator and clean up
+make help           # Show all available commands
 ```
 
 ## Development
@@ -335,12 +430,22 @@ kubectl apply -f resources/ephemeralaccelerationjob.yaml
 │   │   ├── reconcile.py   # Reconciliation logic
 │   │   └── templates.py   # Resource templates
 │   ├── job_image_infer/  # Job container code
-│   │   └── run_infer.py   # Inference script
+│   │   ├── run_infer.py   # Inference script
+│   │   └── requirements.txt
 │   └── cli/               # CLI tool
-│       └── main.py        # CLI implementation
+│       ├── main.py        # CLI implementation
+│       └── README.md      # CLI documentation
 ├── runtimes/              # Dockerfiles
+│   ├── operator.Dockerfile
+│   └── job.Dockerfile
 ├── charts/                # Helm chart
+│   └── ephemeral-gpu-image-inference-operator/
 ├── resources/             # Example resources and sample files
+│   ├── ephemeralaccelerationjob.yaml
+│   ├── gpujob.yaml
+│   └── sample.jpg
+├── docs/                  # Documentation
+│   └── sequence-diagram.md
 └── scripts/               # Utility scripts
 ```
 
@@ -416,3 +521,15 @@ kubectl delete crd ephemeralaccelerationjobs.gpu.yourdomain.io
 -  **Debug Pods**: Create debug pods for interactive PVC access
 -  **TTL-based Cleanup**: Automatic PVC cleanup based on TTL
 -  **Status Monitoring**: Real-time job status watching
+
+## Documentation
+
+- **[Sequence Diagram](docs/sequence-diagram.md)** - Complete lifecycle flow diagram
+- **[CLI Documentation](src/cli/README.md)** - Complete CLI tool reference
+- **[Documentation Index](docs/README.md)** - Overview of all documentation
+
+## References
+
+- [Kopf Documentation](https://kopf.readthedocs.io/) - Kubernetes Operator Framework
+- [Kubernetes Python Client](https://github.com/kubernetes-client/python) - Python client library
+- [PyTorch Documentation](https://pytorch.org/docs/) - Deep learning framework

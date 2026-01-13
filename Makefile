@@ -21,9 +21,9 @@ cli: ## Install CLI tool
 
 build: ## Build both operator and job images
 	@echo "Building operator image..."
-	docker build -f docker/operator.Dockerfile -t $(OPERATOR_IMAGE) .
+	docker build -f runtimes/operator.Dockerfile -t $(OPERATOR_IMAGE) .
 	@echo "Building job image..."
-	docker build -f docker/job.Dockerfile -t $(JOB_IMAGE) .
+	docker build -f runtimes/job.Dockerfile -t $(JOB_IMAGE) .
 	@echo "✓ Images built: $(OPERATOR_IMAGE), $(JOB_IMAGE)"
 
 load: ## Load images into local cluster (k3s/kind)
@@ -56,7 +56,7 @@ install: ## Install operator via Helm
 
 example: ## Apply example EphemeralAccelerationJob and watch status
 	@echo "Applying example EphemeralAccelerationJob..."
-	@kubectl apply -f examples/ephemeralaccelerationjob.yaml
+	@kubectl apply -f resources/ephemeralaccelerationjob.yaml
 	@echo "✓ EphemeralAccelerationJob applied"
 	@echo ""
 	@echo "Watching EphemeralAccelerationJob status (Ctrl+C to stop)..."
