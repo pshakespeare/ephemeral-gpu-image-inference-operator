@@ -103,26 +103,18 @@ kubectl get storageclass
 ### 1. Build Images
 
 ```bash
-make build
+cd ephemeral-gpu-image-inference-operator/runtimes
+docker build -t ephemeral-gpu-operator:latest -f operator.Dockerfile .
+docker build -t gpu-job-inference:latest -f job.Dockerfile .
 ```
 
 This builds:
 - `ephemeral-gpu-operator:latest` - The operator container
 - `gpu-job-inference:latest` - The inference job container
 
-### 2. Load Images (for local clusters)
+### 2. Load Images into your container registry, or load into your k3s cluster
 
-If using k3s or kind, load images into the cluster:
 
-```bash
-make load
-```
-
-For k3s, you may need to import images manually:
-```bash
-sudo k3s ctr images import < operator.tar
-sudo k3s ctr images import < job.tar
-```
 
 ### 3. Install Operator
 
