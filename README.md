@@ -237,7 +237,7 @@ egpu get my-inference
 # Retrieve artifacts (see below)
 ```
 
-### Using kubectl (Manual Method)
+### Using CLI
 
 **Step 1: Copy Input Image to PVC**
 
@@ -408,56 +408,8 @@ kubectl apply -f resources/ephemeralaccelerationjob.yaml
 └── scripts/               # Utility scripts
 ```
 
-## Troubleshooting
 
-### Operator not starting
 
-```bash
-# Check operator logs
-kubectl logs -l app=ephemeral-gpu-image-inference-operator
-
-# Check deployment status
-kubectl describe deployment -l app=ephemeral-gpu-image-inference-operator
-```
-
-### Pod not scheduling
-
-```bash
-# Check GPU availability
-kubectl describe node <node-name> | grep nvidia.com/gpu
-
-# Check pod events
-kubectl describe pod ephemeralaccelerationjob-<job-name>
-
-# Check if GPU device plugin is running
-kubectl get daemonset -n kube-system | grep nvidia
-```
-
-### Job failing
-
-```bash
-# Check pod logs
-kubectl logs ephemeralaccelerationjob-<job-name>
-
-# Check EphemeralAccelerationJob status
-kubectl describe ephemeralaccelerationjob <job-name>
-
-# Verify input image exists in PVC
-# (use debug pod as shown in "Retrieve Artifacts" section)
-```
-
-### PVC issues
-
-```bash
-# Check PVC status
-kubectl get pvc artifacts-<job-name>
-
-# Check storage class
-kubectl get storageclass
-
-# For Longhorn clusters, ensure Longhorn is installed and storage class is available
-# For k3s clusters, ensure local-path provisioner is installed
-```
 
 ## PVC Lifecycle Management
 
