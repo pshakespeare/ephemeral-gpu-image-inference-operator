@@ -98,62 +98,6 @@ nvidia-operator-validator-vs75n                               1/1     Running   
 # Check storage class (should show "longhorn" for Longhorn clusters)
 kubectl get storageclass
 ```
-
-## CLI Tool
-
-The project includes a CLI tool that makes EphemeralAccelerationJobs feel like native Kubernetes resources. The CLI handles PVC creation, file uploads, and resource management automatically.
-
-### Installation
-
-```bash
-# Install CLI
-pip install -e .
-# Or: make cli
-```
-
-### Quick Examples
-
-```bash
-# Create a job with project directory (handles PVC creation and file upload)
-egpu create my-job --project-dir ./my-code --input-path /artifacts/image.jpg
-
-# Create with custom PVC TTL (24 hours retention)
-egpu create training-job \
-  --project-dir ./ml-project \
-  --input-path /artifacts/input.jpg \
-  --pvc-ttl 86400
-
-# Download a file from URL into PVC
-egpu copy-file my-job https://example.com/image.jpg --target-path /artifacts/input.jpg
-
-# Create debug pod for interactive access to PVC
-egpu debug my-job
-# Then: kubectl exec -it debug-my-job-<timestamp> -n default -- sh
-
-# Watch job status
-egpu watch my-job
-
-# Get job details
-egpu get my-job
-
-# List all jobs
-egpu list
-
-# Clean up PVCs for finished jobs (based on TTL)
-egpu cleanup
-
-# Delete job and PVC
-egpu delete my-job --delete-pvc
-```
-
-### Key Features
-
-- **Automatic PVC Management**: Creates and manages PVCs automatically
-- **Project Upload**: Easily upload entire project directories to PVCs
-- **TTL-based Cleanup**: Automatic PVC cleanup based on configurable TTL
-- **Native Feel**: Works like `kubectl get`, `kubectl create`, etc.
-
-
 ## Quick Start
 
 ### 1. Build Images
